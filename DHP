@@ -1,0 +1,88 @@
+library(infotheo)
+library(cluster)
+library(vegan)
+library(igraph)
+dep_mat_su <- function (dd){
+  res <- matrix(0, ncol = (ncol(dd)-1), nrow = (ncol(dd)-1))
+  for (i in 2:(ncol(dd)-1)){
+    for (j in 1:(i-1)){
+      res [i,j] <- symmUnc(dd[,i],dd[,j])
+      res [j,i] <- res[i,j]
+      #print(i+j)
+    }
+  }
+  colnames(res) <- colnames(dd)[1:(length(colnames(dd))-1)]
+  rownames(res) <- colnames(res)
+  return(res)
+}
+symmUnc <- function(x,y){
+  return((2*mutinformation(x,y))/(entropy(x)+entropy(y)))
+}
+
+condSymmUnc <- function(x,y,z){
+  return((2*condinformation(x, y, z, method="emp"))/(condentropy(x, z, method="emp")+condentropy(y, z, method="emp")))
+}
+dhp <- function (dist) {
+  dist <- 1-dist
+  #alpha <- mean(as.matrix(dist)) - quantile(as.matrix(dist))[3] + quantile(as.matrix(dist))[2]
+  #print(paste("your threshold is ",alpha,sep = ""))
+  alpha <- mean(as.matrix(dist))
+  res <- as.list(colnames(dist))
+  names(res) <- colnames(dist)
+  
+  cdist <- dist
+  j <- 1
+  
+  repeat{
+    
+    if (min(cdist)<alpha){
+      
+      m <- which(cdist == min(cdist), arr.ind = TRUE)
+      #print ("minimal distances")
+      #print(m)
+      
+      e1 <- list(colnames(cdist)[m[1,1]],m[1,1])
+      e2 <- list(colnames(cdist)[m[1,2]],m[1,2])
+      
+      #print(c(e1[[1]],e1[[2]],e2[[1]],e2[[2]]))
+      
+      res[[e1[[1]]]] <- c(res[[e1[[1]]]],res[[e2[[1]]]])
+      names(res)[which(names(res)==e1[[1]])] <- paste("c",j,sep = "")
+      
+      res <- res [ - which(names(res) == e2[[1]])]
+      
+      cdist <- replace_el (e1,e2,cdist,paste("c",j,sep = ""))
+      j <- j+1
+      
+    }else{
+      break
+    }
+    
+  }
+  
+  for (i in 1:length(res)){
+    aux <- which(colnames(dist)%in%res[[i]])
+    names(aux) < sort(res[[i]])
+    res[[i]] <- aux
+  }
+  return (res)
+}
+
+# merging two elements in the clustering process
+
+replace_el <- function (el1,el2,mdist,c){
+  tdist <- mdist
+  tdist <- tdist [-c(el1[[2]],el2[[2]]),-c(el1[[2]],el2[[2]])]
+  vd <- rep(0, ncol(tdist))
+  #print(vd)
+  for (i in 1:length(vd)){
+    vd[i] <- (mdist[el1[[1]],colnames(tdist)[i]]+mdist[el2[[1]],colnames(tdist)[i]])/2
+    #print(c(i,vd[i]))
+  }
+  #print(c(length(vd),ncol(tdist),nrow(tdist)))
+  tdist <- rbind(tdist,vd)
+  tdist <- cbind(tdist,c(vd,1))
+  colnames(tdist)[length(vd)+1] <- c
+  rownames(tdist)[length(vd)+1] <- c
+  return (tdist)
+}
