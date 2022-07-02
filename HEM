@@ -1,0 +1,161 @@
+library(infotheo)
+library(bnlearn)
+library(plyr)
+library(igraph)
+library(fpc)
+library(mclust)
+library(cluster)
+library(kohonen)
+# ---------------------------------------------------------------
+# HEM for learning one LV (few instances)
+#  --------------------------------------------------------------
+hem <- function (d,k){
+  u <- ddply(d,(colnames(d)),.fun=nrow)
+  if (k %in% 2:nrow(u)){card <- k}else{card <- 2}
+  print("filling the original values of the latent variable")
+  x <- Lv_fill(d,u)
+  # merge rarely observed instances (input x and card)
+  pcard <- nrow(u[which(u[,ncol(u)]<5),])
+  print(paste("the number of rarely observed intances is ",pcard,sep = ""))
+  l <- list(0)
+  l[[1]] <- list( cardinality = nrow(u), partition = x[,ncol(x)])
+  print("merging the rearely observed instances")
+  rc <- nrow(u)-pcard
+  if(rc>k){
+    a1 <- merge_rare(x,rc)
+    l[[2]] <- list( cardinality = length(levels(a1)), partition = a1)
+    #l[[1]] <- list( cardinality = nrow(u), partition = x[,ncol(x)])
+    print(paste(length(l), l[[length(l)]]["cardinality"]),sep="  ")
+    print("merging the rest of the instances")
+    repeat{
+      a <- merge_instO (cbind(d,l[[length(l)]]["partition"]))
+      a <- as.factor(as.character(a))
+      l <- c(l,list(list(cardinality = length(levels(a)), partition = a)))
+      print(paste(length(l), l[[length(l)]]["cardinality"]),sep="  ")
+      if(l[[length(l)]]["cardinality"]==card){
+        break
+      }
+    }
+    res <- l[[length(l)]][2]
+  }else{
+    a1 <- merge_rare(x,k+1)
+    res <- a1
+  }
+  return(res)
+}
+
+merge_instO <- function (x){
+  # x is the dataset where the last column is the previous partition
+  u <- levels(x[,ncol(x)])
+  res <- matrix (0, nrow = length(u), ncol = length(u))
+  
+  for (i in 2:length(u)){
+    for (j in 1:(i-1)){
+      aux <- merge_states(u, c(i,j), x[,ncol(x)])
+      res[i,j] <- sum(uncertainty_ds(x[,1:(ncol(x)-1)],aux))
+    }
+  }
+  m <- which(res == max(res), arr.ind = TRUE)
+  #m <- which(res > (max(res)-(max(res)/10)), arr.ind = TRUE)
+  y <- x[,ncol(x)]
+  
+  if (length(u)>20){
+    g <- graph_from_edgelist(matrix(as.character(m),ncol=2,byrow=F),directed = F)
+    mc <- maximal.cliques(g)
+    for (i in 1:length(mc)){
+      y <- merge_states(u,as.vector(mc[[i]]),y)
+    }
+  }else{
+    y <- merge_states(u,c(m[1,1],m[1,2]),y)
+  }
+  return(y)
+}
+
+merge_states <- function (lev, indices, part){
+  p <- part
+  p[which(part %in% lev[indices])] <- lev[indices[1]]
+  return(p)
+}
+
+merge_rare <- function (d,card){
+  n <- ncol(d)
+  p <- d
+  repeat{
+    s <- levels(p[,n])
+    u <- ddply(p,colnames(p)[n],.fun=nrow)
+    m <- which.min(u[,2])
+    r <- vector(mode = "numeric",length = length(s)-1)
+    for (i in 1:length(s)){
+      if (i == m){
+        r[i] <- 0
+      }else{
+        aux <- merge_states(s, c(i,m), p[,n])
+        r[i] <- sum(uncertainty_ds(d[,1:(n-1)],aux))
+      }
+    }
+    o <- which.max(r)
+    p[,n] <- merge_states(s,c(m,o),p[,n])
+    p[,n] <- as.factor(as.character(p[,n]))
+    print(length(levels(p[,n])))
+    if (length(levels(p[,n]))<card){
+      print("stop merging rare instances")
+      break
+    }
+  }
+  return(p[,n])
+}
+
+uncertainty_ds <- function (x,y){
+  res <- vector(mode = "numeric", length = ncol(x))
+  for (i in 1:ncol(x)){
+    res[i] <- uncertainty(x[,i],y)
+  }
+  return(res)
+}
+
+uncertainty <- function(x,y){
+  return(mutinformation(x,y)/entropy(x))
+}
+
+# ---------------------------------------------------------------
+# Learn a Lv from a partition
+#  --------------------------------------------------------------
+
+LV_learn <- function(p,d){
+  res <- matrix("",ncol =length(p),nrow = nrow(d))
+  if (nrow(d)<100){
+    for (q in 1:length(p)){
+      print(paste("Learn LV for partition",q,"over",length(p),sep = " "))
+      if(length(p[[q]])>1){
+        res[,q] <- hem(d[,p[[q]]],(nrow(d)/5))
+      }else{
+        res[,q] <- d[,p[[q]]]
+      }
+    }
+  }else{
+    
+    for (q in 1:length(p)){
+      print(paste("Learn LV for partition",q,"over",length(p),sep = " "))
+      if(length(p[[q]])>1){
+        res[,q] <- res[,q] <- gec(d[,p[[q]]])
+      }else{
+        res[,q] <- d[,p[[q]]]
+      }
+    }
+  }
+  print(paste("the length of the transformed data", ncol(res),sep = " "))
+  return(res)
+}
+
+# ---------------------------------------------------------------
+# Distance between the instances
+#  --------------------------------------------------------------
+inst_dist <- function(d){
+  res <- matrix(0,ncol = nrow(d),nrow = nrow(d))
+  for (i in 2:nrow(d)){
+    for(j in 1:(i-1)){
+      res[i,j] <- ncol(d)-length(which(d[i,]==d[j,]))
+    }
+  }
+  return(res)
+}
